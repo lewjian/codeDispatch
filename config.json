@@ -1,0 +1,42 @@
+{
+  "NOTICE": "programs里面的program_path必须以/结尾",
+  "programs": [
+    {
+      "program_name": "vue-web",
+      "program_path": "/www/vue-web/",
+      "dest_path": "/www/vue-web",
+      "scripts": [
+        "npm run build"
+      ],
+      "ignore_files": [
+        "node_modules",
+        "public/src"
+      ]
+    },
+    {
+      "program_name": "go-api",
+      "program_path": "/www/go-api/",
+      "dest_path": "/webroot/go-api",
+      "scripts": [],
+      "go_exec_path": "go",
+      "build_source_prefix": "",
+      "ignore_files": [
+        "test.json",
+        "*.go"
+      ]
+    }
+  ],
+  "dest_hosts": [
+    {
+      "username": "www",
+      "alias": "my-server-name",
+      "host": "127.10.0.1",
+      "port": 22,
+      "key_file": "/www/my-ssh-key"
+    }
+  ],
+  "ignore_files": [
+    ".svn"
+  ],
+  "save_path": "/www/log/code_dispatch"
+}
