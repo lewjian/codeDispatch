@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"encoding/xml"
 	"flag"
@@ -51,7 +52,8 @@ type RuntimeArgs struct {
 	Programs       string
 	GoPrograms     string
 	NeedHelp       bool
-	Revert         bool // 是否版本回退
+	Revert         bool   // 是否版本回退
+	To             string // 指定发布服务器，为空表示全部发布
 }
 
 type SVNLogs struct {
@@ -66,6 +68,9 @@ type SVNLogItem struct {
 	Msg      string   `xml:"msg"`
 }
 
+//go:embed config.json
+var configJsonFileData []byte
+
 var ra RuntimeArgs
 
 func main() {
@@ -74,8 +79,12 @@ func main() {
 	for _, configPro := range ra.JsonConfig.Programs {
 		programs = append(programs, configPro.ProgramName)
 	}
+	var pubHosts []string
+	for _, host := range ra.JsonConfig.DestHosts {
+		pubHosts = append(pubHosts, fmt.Sprintf("%s[%s@%s]", host.Alias, host.Username, host.Host))
+	}
 	var f = func() {
-		color.Comment.Printf("Usage of %s\n支持上线的项目有（需要使用-c指定配置文件才可正确展示）:\n\t|-%s\n\n其他参数说明如下：\n", os.Args[0], strings.Join(programs, "\n\t|-"))
+		color.Comment.Printf("Usage of %s\n支持上线的项目有（需要使用-c指定配置文件才可正确展示）:\n\t|-%s\n发布的服务器包含：\n\t|-%s\n\n其他参数说明如下：\n\n", os.Args[0], strings.Join(programs, "\n\t|-"), strings.Join(pubHosts, "\n\t|-"))
 		flag.PrintDefaults()
 	}
 	flag.Usage = f
@@ -94,6 +103,25 @@ func main() {
 	}
 	if ra.Programs != "all" {
 		programs = strings.Split(ra.Programs, ",")
+	}
+
+	// 检查t命令是否正确
+	if ra.To != "" {
+		alias := make([]string, 0, len(ra.JsonConfig.DestHosts))
+		var ok bool
+		for _, host := range ra.JsonConfig.DestHosts {
+			if host.Alias == ra.To {
+				ok = true
+				sep := strings.Repeat("-", 70)
+				color.Info.Printf("%s\n本次仅发布服务器：%s[%s@%s]\n%s\n", sep, host.Alias, host.Username, host.Host, sep)
+				break
+			}
+			alias = append(alias, host.Alias)
+		}
+		if !ok {
+			color.Error.Printf("-t命令错误，输入为：%s，支持列表为：%s\n", ra.To, strings.Join(alias, ","))
+			os.Exit(-1)
+		}
 	}
 	programNum := len(programs)
 	buffChan := make(chan ProgramResult, programNum)
@@ -226,8 +254,14 @@ func startDispatch(program ProgramItem, proBuffChan chan ProgramResult) {
 
 	// 通过rsync 发布文件
 	hostNum := len(ra.JsonConfig.DestHosts)
+	if ra.To != "" {
+		hostNum = 1
+	}
 	buffChan := make(chan RsyncResult, hostNum)
 	for _, host := range ra.JsonConfig.DestHosts {
+		if ra.To != "" && ra.To != host.Alias {
+			continue
+		}
 		cmdStr := fmt.Sprintf(`rsync -rtzPv --progress  -e "ssh -i %s -p %d" %s %s@%s:%s`, host.KeyFile, host.Port,
 			program.ProgramPath, host.Username, host.Host, program.DestPath)
 		// 添加排除文件
@@ -314,14 +348,18 @@ func init() {
 	flag.BoolVar(&ra.NeedHelp, "h", false, "使用帮助")
 	flag.BoolVar(&ra.Revert, "r", false, "指定是否本次是版本回退操作")
 	flag.BoolVar(&ra.Init, "i", false, "初始化，尝试连接远程服务器，只需执行一次")
+	flag.StringVar(&ra.To, "t", "", "代码发布服务器，默认所有配置服务器，值为对应json配置文件里面的dest_hosts.alias")
 	flag.Parse()
-
-	fileContent, err := GetFileContent(ra.ConfigFileName)
-	if err != nil {
-		color.Error.Println(err)
-		os.Exit(-1)
+	var err error
+	// 优先使用配置文件
+	if ra.ConfigFileName != "" {
+		configJsonFileData, err = GetFileContent(ra.ConfigFileName)
+		if err != nil {
+			color.Error.Println(err)
+			os.Exit(-1)
+		}
 	}
-	jsonError := json.Unmarshal(fileContent, &ra.JsonConfig)
+	jsonError := json.Unmarshal(configJsonFileData, &ra.JsonConfig)
 	if jsonError != nil {
 		color.Error.Println(jsonError)
 		os.Exit(-1)
